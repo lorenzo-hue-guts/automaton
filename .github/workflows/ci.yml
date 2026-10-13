@@ -1,8 +1,11 @@
 name: CI
 on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       matrix:
         node-version: [20, 22]
@@ -18,7 +21,7 @@ jobs:
         timeout-minutes: 10
         run: |
           set +e
-          timeout 300 pnpm test
+          timeout 300 pnpm exec vitest run --maxWorkers=2 --minWorkers=1
           RC=$?
           set -e
           # Exit code 124 means timeout killed the process (vitest hung after tests completed)
@@ -28,7 +31,7 @@ jobs:
         timeout-minutes: 10
         run: |
           set +e
-          timeout 180 pnpm test -- --grep "security|injection|policy|financial"
+          timeout 180 pnpm exec vitest run --maxWorkers=2 --minWorkers=1 --grep "security|injection|policy|financial"
           RC=$?
           set -e
           if [ "$RC" -eq 124 ]; then echo "::error::Test command timed out; results are not a pass"; exit 124; fi
@@ -36,6 +39,7 @@ jobs:
 
   security-audit:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
