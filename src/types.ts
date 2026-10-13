@@ -6,6 +6,7 @@
 
 import type { PrivateKeyAccount, Address } from "viem";
 import type { ChainType, ChainIdentity } from "./identity/chain.js";
+import { DEFAULT_PRODUCT_FACTORY_CONFIG } from "./product-factory/config.js";
 
 // ─── Identity ────────────────────────────────────────────────────
 
@@ -41,6 +42,8 @@ export interface ProvisionResult {
 // ─── Configuration ───────────────────────────────────────────────
 
 export interface AutomatonConfig {
+  /** Optional for legacy configs; absent means disabled. */
+  productFactory?: import("./product-factory/config.js").ProductFactoryConfig;
   name: string;
   genesisPrompt: string;
   creatorMessage?: string;
@@ -78,6 +81,7 @@ export interface AutomatonConfig {
 }
 
 export const DEFAULT_CONFIG: Partial<AutomatonConfig> = {
+  productFactory: DEFAULT_PRODUCT_FACTORY_CONFIG,
   conwayApiUrl: "https://api.conway.tech",
   inferenceModel: "gpt-5.2",
   maxTokensPerTurn: 4096,
@@ -624,6 +628,8 @@ export const DEFAULT_HTTP_CLIENT_CONFIG: HttpClientConfig = {
 // ─── Database ────────────────────────────────────────────────────
 
 export interface AutomatonDatabase {
+  /** Uses the same SQLite connection and transaction boundaries. */
+  productFactory: import("./product-factory/store.js").ProductFactoryStore;
   // Identity
   getIdentity(key: string): string | undefined;
   setIdentity(key: string, value: string): void;

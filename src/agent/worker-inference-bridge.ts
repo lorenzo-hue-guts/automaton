@@ -20,6 +20,9 @@ export function createWorkerInferenceBridge(
 
       return {
         content: response.content,
+        usage: response.usage,
+        cost: response.cost,
+        metadata: response.metadata,
         toolCalls: response.toolCalls as InferenceToolCall[] | undefined,
       };
     },

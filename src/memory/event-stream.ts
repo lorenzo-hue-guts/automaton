@@ -14,6 +14,9 @@ import {
 type Database = BetterSqlite3.Database;
 
 export type EventType =
+  | "factory_build"
+  | "factory_discovery"
+  | "factory_state"
   | "user_input"
   | "plan_created"
   | "plan_updated"

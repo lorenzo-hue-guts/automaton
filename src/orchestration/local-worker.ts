@@ -11,8 +11,10 @@ import { createLogger } from "../observability/logger.js";
 import type { HarnessContext, WorkerInferenceClient } from "../agent/harness-types.js";
 import { buildWisdomFromGoal, createBudgetFromTask } from "../agent/harness-types.js";
 import { HarnessRegistry } from "../agent/harness-registry.js";
-import { completeTask, failTask } from "./task-graph.js";
-import type { TaskNode } from "./task-graph.js";
+import { completeTask, failTask, taskRowToTaskNode } from "./task-graph.js";
+import { getTaskById } from "../state/database.js";
+import type { AgentHarness } from "../agent/harness-types.js";
+import type { TaskNode, TaskResult } from "./task-graph.js";
 import { AgentWorkspace } from "./workspace.js";
 import type {
   AutomatonConfig,
@@ -29,7 +31,13 @@ import type { PolicyEngine } from "../agent/policy-engine.js";
 const logger = createLogger("orchestration.local-worker");
 const DEFAULT_ALLOWED_EDIT_ROOT = process.cwd();
 
+export interface FactoryWorkerHooks {
+  before(task: TaskNode, context: HarnessContext, harness: AgentHarness): void;
+  complete(task: TaskNode, result: TaskResult): void;
+  fail(task: TaskNode, error: string, costCents: number): void;
+}
 interface LocalWorkerConfig {
+  factoryHooks?: FactoryWorkerHooks;
   db: Database;
   inference: WorkerInferenceClient;
   conway: ConwayClient;
@@ -51,6 +59,12 @@ export class LocalWorkerPool {
   constructor(private readonly config: LocalWorkerConfig) {}
 
   spawn(task: TaskNode): { address: string; name: string; sandboxId: string } {
+    const stored = getTaskById(this.config.db, task.id);
+    if (stored?.factory || task.factory) {
+      if (!stored?.factory || !this.config.factoryHooks || !this.config.policyEngine || !this.config.toolContext || !this.config.spendTracker) throw new Error("Factory workers require resource hooks and policy/tool/spend context");
+      task = taskRowToTaskNode(stored);
+      if (task.status !== "assigned") throw new Error("Factory worker needs an assigned task");
+    }
     const workerId = `local-worker-${ulid()}`;
     const workerName = `worker-${task.agentRole ?? "generalist"}-${workerId.slice(-6)}`;
     const address = `local://${workerId}`;
@@ -63,12 +77,8 @@ export class LocalWorkerPool {
           taskId: task.id,
         });
         try {
-          failTask(
-            this.config.db,
-            task.id,
-            `Worker crashed: ${error instanceof Error ? error.message : String(error)}`,
-            true,
-          );
+          if (task.factory) this.config.factoryHooks!.fail(task, "Factory worker crashed", 0);
+          else failTask(this.config.db, task.id, `Worker crashed: ${error instanceof Error ? error.message : String(error)}`, true);
         } catch {
           // Task may already be in a terminal state.
         }
@@ -88,6 +98,11 @@ export class LocalWorkerPool {
   hasWorker(addressOrId: string): boolean {
     const id = addressOrId.replace("local://", "");
     return this.activeWorkers.has(id);
+  }
+
+  /** Await acknowledgements without aborting workers (no scheduler or polling loop). */
+  async waitForIdle(): Promise<void> {
+    await Promise.allSettled([...this.activeWorkers.values()].map((worker) => worker.promise));
   }
 
   async shutdown(): Promise<void> {
@@ -142,11 +157,13 @@ export class LocalWorkerPool {
     );
 
     try {
+      if (task.factory) this.config.factoryHooks!.before(task, context, harness);
       await harness.initialize(task, context);
       const result = await harness.execute();
 
       if (result.success) {
-        completeTask(this.config.db, task.id, result);
+        if (task.factory) this.config.factoryHooks!.complete(task, result);
+        else completeTask(this.config.db, task.id, result);
         logger.info("Local worker completed task", {
           workerId,
           taskId: task.id,
@@ -155,7 +172,8 @@ export class LocalWorkerPool {
           harness: harness.id,
         });
       } else {
-        failTask(this.config.db, task.id, result.output || "Task reported failure", true);
+        if (task.factory) this.config.factoryHooks!.fail(task, "Factory worker reported failure", result.costCents);
+        else failTask(this.config.db, task.id, result.output || "Task reported failure", true);
         logger.warn("Local worker reported task failure", {
           workerId,
           taskId: task.id,
@@ -167,7 +185,8 @@ export class LocalWorkerPool {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       logger.error(`[WORKER ${workerId}] Harness execution failed: ${message}`);
-      failTask(this.config.db, task.id, message, true);
+      if (task.factory) this.config.factoryHooks!.fail(task, "Factory harness failed", context.budget.costUsedCents);
+      else failTask(this.config.db, task.id, message, true);
     }
   }
 }

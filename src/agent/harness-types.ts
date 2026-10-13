@@ -35,6 +35,7 @@ export interface HarnessTool {
 }
 
 export interface HarnessContext {
+  factoryModelRun?: () => Promise<TaskResult>;
   workspaceRoot: string;
   allowedEditRoot: string;
   workspace: AgentWorkspace;
@@ -68,6 +69,9 @@ export interface WorkerInferenceClient {
     responseFormat?: { type: string };
   }): Promise<{
     content: string;
+    usage?: { inputTokens: number; outputTokens: number; totalTokens: number };
+    cost?: { totalCostCredits: number };
+    metadata?: { providerId: string; modelId: string; retries: number };
     toolCalls?: InferenceToolCall[];
   }>;
 }

@@ -1,0 +1,39 @@
+import fs from 'node:fs';import os from 'node:os';import path from 'node:path';import Database from 'better-sqlite3';import {it,expect} from 'vitest';
+import {createDatabase} from '../../state/database.js';import * as schema from '../../state/schema.js';import {FactoryAnalytics,SyntheticAnalyticsProvider,resolveAnalyticsConfig} from '../../product-factory/index.js';import {analyticsFixture} from './fixtures/analytics-fixture.js';
+it('V16 upgrades a genuine V15 database and preserves Company history/targets/evidence; migration idempotent',()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'analytics-migrate-')),file=path.join(dir,'db');let db=createDatabase(file);
+ try {const x=analyticsFixture(db);x.f.target();const hash=x.f.os.store.get('target','week1')!.hash;db.close();const raw=new Database(file);raw.exec('DROP TABLE analytics_observations;DROP TABLE analytics_event_receipts;DELETE FROM schema_version WHERE version=16;');raw.close();db=createDatabase(file);expect(db.raw.prepare('SELECT MAX(version) version FROM schema_version').get()).toEqual({version:16});expect(db.raw.pragma('foreign_key_check')).toEqual([]);expect(db.raw.prepare("SELECT content_hash hash FROM company_records WHERE kind='target'").get()).toEqual({hash});db.close();db=createDatabase(file);expect(db.raw.prepare('SELECT COUNT(*) n FROM schema_version WHERE version=16').get()).toEqual({n:1});}finally{if(db.raw.open)db.close();fs.rmSync(dir,{recursive:true,force:true});}
+});
+it('V16 schema conflict rolls back cleanly without changing V15 history',()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'analytics-migrate-')),file=path.join(dir,'db');const db=createDatabase(file);
+ try{db.raw.exec('DROP TABLE analytics_observations;DROP TABLE analytics_event_receipts;CREATE TABLE analytics_observations(dummy TEXT);');expect(()=>db.raw.transaction(()=>db.raw.exec(schema.MIGRATION_V16))()).toThrow();expect(db.raw.prepare('PRAGMA table_info(analytics_observations)').all()).toHaveLength(1);}finally{db.close();fs.rmSync(dir,{recursive:true,force:true});}
+});
+it('runtime key rotation fails closed; configuration defaults disabled and capped',()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'analytics-identity-'));const db=createDatabase(path.join(dir,'db'));
+ try{const x=analyticsFixture(db);x.ingest([x.event('grossRevenue',100)]);expect(()=>new FactoryAnalytics(x.f.os,{...x.options,pseudonymKey:'a-different-pseudonym-key-with-32-bytes'})).toThrow(/identity migration/);expect(resolveAnalyticsConfig().enabled).toBe(false);expect(()=>resolveAnalyticsConfig({maxBatchEvents:10001})).toThrow();expect(()=>resolveAnalyticsConfig({enabled:true,allowSpend:true})).toThrow();expect(()=>x.f.os.record('analyticsProvider','bypass',{} as any,'CREATOR')).toThrow(/guarded/);}finally{db.close();fs.rmSync(dir,{recursive:true,force:true});}
+});
+it('frozen report analysis excludes late events; source identities cannot silently upgrade trust',()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'analytics-frozen-'));const db=createDatabase(path.join(dir,'db'));
+ try{const x=analyticsFixture(db);x.ingest([x.event(undefined,0,{eventName:'signup'})]);x.analytics.report('r',x.scope());x.analytics.funnelDefinition('f',{productId:x.product,entity:'user',steps:[{name:'signup',eventName:'signup'}],windowMs:1000,firstValueStep:null,changeReason:'Frozen population'});const f=x.analytics.funnel('first','f','r');x.ingest([x.event(undefined,0,{eventName:'signup',identifiers:{user:'new-user'}})]);const again=x.analytics.funnel('again','f','r');expect(again.body.stages[0].count).toBe(f.body.stages[0].count);expect(()=>new FactoryAnalytics(x.f.os,{...x.options,providers:[x.provider({...x.source('billing'),reliability:.99})]})).toThrow(/identity/);}finally{db.close();fs.rmSync(dir,{recursive:true,force:true});}
+});
+it('synthetic fixture adapter cannot be promoted to observed; sensitive cursors and batches fail before persistence',()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'analytics-boundary-'));const db=createDatabase(path.join(dir,'db'));
+ try{const x=analyticsFixture(db);const bad=x.options.providers[2];expect(bad.source.nature).toBe('SYNTHETIC');expect(()=>x.analytics.ingest('billing',{...x.batch([]),cursor:'sk-super-secret'})).toThrow(/cursor/);expect(()=>x.analytics.ingest('billing',{...x.batch([x.event('grossRevenue',100)]),coverage:[{productId:'foreign',period:x.period,metrics:[],complete:true}]})).toThrow(/coverage/);expect(db.raw.prepare('SELECT COUNT(*) n FROM analytics_observations').get()).toEqual({n:0});}finally{db.close();fs.rmSync(dir,{recursive:true,force:true});}
+});
+
+it('retention design — minimized receipts prevent replay after raw pruning; frozen aggregates remain, recalculation fails closed',()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'analytics-retention-'));const db=createDatabase(path.join(dir,'db'));
+ try{const x=analyticsFixture(db),payment=x.event('grossRevenue',100);x.ingest([payment]);const r=x.analytics.report('r',x.scope());db.raw.exec('DELETE FROM analytics_observations;');expect(x.ingest([payment]).body.duplicates).toBe(1);expect(db.raw.prepare('SELECT COUNT(*) n FROM analytics_observations').get()).toEqual({n:0});expect(x.f.os.store.get('analyticsReport','r')?.hash).toBe(r.hash);expect(()=>x.analytics.report('recalculate',x.scope())).toThrow(/expired/);expect(()=>db.raw.exec('DELETE FROM analytics_event_receipts')).toThrow(/retained/);}finally{db.close();fs.rmSync(dir,{recursive:true,force:true});}
+});
+it('metric definition changes never silently relabel a fixed calculation; tracker cannot be a billing authority',()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'analytics-definitions-'));const db=createDatabase(path.join(dir,'db'));
+ try{const x=analyticsFixture(db);x.ingest([x.event('grossRevenue',100)]);x.analytics.report('r',x.scope());const d=x.f.os.store.get('metricDefinition','analytics:grossRevenue')!;x.f.os.record('metricDefinition',d.key,{...d.body,formula:'Count trials as money',changeReason:'Adversarial attempted new definition'},'JUDGE',d.revision);expect(()=>x.analytics.report('new',x.scope())).toThrow(/implementation unavailable/);expect(()=>new FactoryAnalytics(x.f.os,{...x.options,providers:[x.provider(x.source('pretend-billing',['grossRevenue'],'PRODUCT_ANALYTICS'))]})).toThrow(/authority/);}finally{db.close();fs.rmSync(dir,{recursive:true,force:true});}
+});
+it('MODEL analytics remains hypothesis level zero when published, never public/observed evidence',()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'analytics-model-'));const db=createDatabase(path.join(dir,'db'));
+ try{const x=analyticsFixture(db),p=x.provider({...x.source('model'),nature:'MODEL'}),a=new FactoryAnalytics(x.f.os,{...x.options,providers:[p]});a.ingest('model',x.batch([x.event('grossRevenue',100)]));const r=a.report('model',{...x.scope(),nature:'MODEL'});const s=a.publish(r.key,'model-snapshot',x.f.opportunity('Model',false));const e=x.f.os.evidence.require(s.body.metrics.grossRevenue.evidenceIds[0]);expect(e.company?.level).toBe(0);expect(e.company?.origin).toBe('model');expect(s.body.metrics.grossRevenue.nature).toBe('HYPOTHESIS');}finally{db.close();fs.rmSync(dir,{recursive:true,force:true});}
+});
+it('complete verified zero is an audited observation, whereas missing coverage remains UNKNOWN',()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'analytics-zero-'));const db=createDatabase(path.join(dir,'db'));
+ try{const x=analyticsFixture(db);x.ingest([]);const r=x.analytics.report('zero',x.scope()),s=x.analytics.publish(r.key,'zero-snapshot',x.f.opportunity('Empty verified period',false));expect(s.body.metrics.grossRevenue.value).toBe(0);expect(s.body.metrics.profit.value).toBe(0);expect(s.body.metrics.cash.value).toBeNull();expect(x.f.os.evidence.require(s.body.metrics.grossRevenue.evidenceIds[0]).provenance.excerpt).toContain('coverageRefs');}finally{db.close();fs.rmSync(dir,{recursive:true,force:true});}
+});

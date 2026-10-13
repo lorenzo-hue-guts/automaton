@@ -1,3 +1,5 @@
+import { attachFactoryTaskMetadata } from "./factory-tasks.js";
+import type { FactoryTaskMetadata } from "../product-factory/scheduling-types.js";
 /**
  * Automaton Database
  *
@@ -6,6 +8,7 @@
  */
 
 import Database from "better-sqlite3";
+import { ProductFactoryStore } from "../product-factory/store.js";
 import type BetterSqlite3 from "better-sqlite3";
 import fs from "fs";
 import path from "path";
@@ -46,6 +49,11 @@ import {
   MIGRATION_V9_ALTER_CHILDREN_ROLE,
   MIGRATION_V10,
   MIGRATION_V11,
+  MIGRATION_V12,
+  MIGRATION_V13,
+  MIGRATION_V14,
+  MIGRATION_V15,
+  MIGRATION_V16,
 } from "./schema.js";
 import type {
   RiskLevel,
@@ -561,6 +569,7 @@ export function createDatabase(dbPath: string): AutomatonDatabase {
     runTransaction,
     close,
     raw: db,
+    productFactory: new ProductFactoryStore(db),
   };
 }
 
@@ -625,6 +634,14 @@ function applyMigrations(db: DatabaseType): void {
         try { db.exec(MIGRATION_V11); } catch { /* column may already exist */ }
       },
     },
+    {
+      version: 12,
+      apply: () => db.exec(MIGRATION_V12),
+    },
+    { version: 13, apply: () => db.exec(MIGRATION_V13) },
+    { version: 14, apply: () => db.exec(MIGRATION_V14) },
+    { version: 15, apply: () => db.exec(MIGRATION_V15) },
+    { version: 16, apply: () => db.exec(MIGRATION_V16) },
   ];
 
   for (const m of migrations) {
@@ -699,6 +716,7 @@ export interface GoalRow {
 }
 
 export interface TaskGraphRow {
+  factory?: FactoryTaskMetadata;
   id: string;
   parentId: string | null;
   goalId: string;
@@ -910,6 +928,7 @@ export function getActiveGoals(db: DatabaseType): GoalRow[] {
 export function insertTask(
   db: DatabaseType,
   row: {
+    factory?: FactoryTaskMetadata;
     parentId?: string | null;
     goalId: string;
     title: string;
@@ -929,6 +948,7 @@ export function insertTask(
     completedAt?: string | null;
   },
 ): string {
+  return db.transaction(() => {
   const id = ulid();
   const now = new Date().toISOString();
   db.prepare(
@@ -958,7 +978,9 @@ export function insertTask(
     row.startedAt ?? null,
     row.completedAt ?? null,
   );
+  if (row.factory) attachFactoryTaskMetadata(db, id, row.factory);
   return id;
+  })();
 }
 
 export function getTaskById(db: DatabaseType, id: string): TaskGraphRow | undefined {
@@ -989,11 +1011,12 @@ export function updateTaskStatus(db: DatabaseType, id: string, status: TaskGraph
   ).run(status, id);
 }
 
-export function getReadyTasks(db: DatabaseType): TaskGraphRow[] {
+export function getReadyTasks(db: DatabaseType, options: { factoryOnly?: boolean } = {}): TaskGraphRow[] {
   const rows = db.prepare(
     `SELECT t.*
      FROM task_graph t
      WHERE t.status = 'pending'
+       AND (CASE WHEN ? = 1 THEN t.product_id IS NOT NULL ELSE t.product_id IS NULL END)
        AND NOT EXISTS (
          SELECT 1
          FROM json_each(COALESCE(NULLIF(t.dependencies, ''), '[]')) dep
@@ -1001,7 +1024,7 @@ export function getReadyTasks(db: DatabaseType): TaskGraphRow[] {
          WHERE d.status IS NULL OR d.status != 'completed'
        )
      ORDER BY t.priority DESC, t.created_at ASC`,
-  ).all() as any[];
+  ).all(options.factoryOnly ? 1 : 0) as any[];
   return rows.map(deserializeTaskGraphRow);
 }
 
@@ -2261,7 +2284,17 @@ function deserializeGoalRow(row: any): GoalRow {
 }
 
 function deserializeTaskGraphRow(row: any): TaskGraphRow {
+  const factoryDetails = row.product_id ? JSON.parse(row.factory_details) : null;
   return {
+    ...(row.product_id ? { factory: {
+      productId: row.product_id, factoryActionId: row.factory_action_id, resourceClass: row.resource_class,
+      reservationId: row.reservation_id ?? null, deadline: row.deadline ?? null, urgency: row.urgency,
+      requiresApproval: !!row.requires_approval, preemptible: !!row.preemptible, criticalIncident: !!row.critical_incident,
+      resourceUnits: row.resource_units,
+      signals: factoryDetails.signals,
+      approvalId: factoryDetails.approvalId ?? null,
+      ...(factoryDetails.failureScope === "action" ? { failureScope: "action" as const } : {}),
+    } as FactoryTaskMetadata } : {}),
     id: row.id,
     parentId: row.parent_id ?? null,
     goalId: row.goal_id,

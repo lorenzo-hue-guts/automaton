@@ -5,7 +5,7 @@
  * The database IS the automaton's memory.
  */
 
-export const SCHEMA_VERSION = 11;
+export const SCHEMA_VERSION = 16;
 
 export const CREATE_TABLES = `
   -- Schema version tracking
@@ -678,4 +678,334 @@ export const MIGRATION_V10 = `
 
   CREATE INDEX idx_knowledge_category ON knowledge_store(category);
   CREATE INDEX idx_knowledge_key ON knowledge_store(key);
+`;
+
+// Product Factory foundations; no runtime activation or treasury changes.
+export const MIGRATION_V12 = `
+CREATE TABLE factory_opportunities (
+  id TEXT PRIMARY KEY NOT NULL CHECK(length(trim(id)) > 0),
+  created_at TEXT NOT NULL,
+  title TEXT NOT NULL,
+  problem TEXT NOT NULL,
+  status TEXT NOT NULL CHECK(status IN ('new','evaluating','accepted','rejected'))
+);
+
+CREATE INDEX idx_factory_opportunities_created ON factory_opportunities(created_at, id);
+
+CREATE TABLE factory_evidence (
+  id TEXT PRIMARY KEY NOT NULL CHECK(length(trim(id)) > 0),
+  created_at TEXT NOT NULL,
+  opportunity_id TEXT NOT NULL REFERENCES factory_opportunities(id),
+  source TEXT NOT NULL,
+  content TEXT NOT NULL,
+  confidence REAL NOT NULL CHECK(confidence BETWEEN 0 AND 1)
+);
+
+CREATE INDEX idx_factory_evidence_created ON factory_evidence(created_at, id);
+
+CREATE TABLE factory_products (
+  id TEXT PRIMARY KEY NOT NULL CHECK(length(trim(id)) > 0),
+  created_at TEXT NOT NULL,
+  opportunity_id TEXT REFERENCES factory_opportunities(id),
+  creator_address TEXT NOT NULL CHECK(length(trim(creator_address)) > 0),
+  name TEXT NOT NULL,
+  stage TEXT NOT NULL CHECK(stage IN ('draft','validating','building','paused','archived')),
+  revenue_cents INTEGER NOT NULL CHECK(typeof(revenue_cents) = 'integer' AND revenue_cents >= 0)
+);
+
+CREATE INDEX idx_factory_products_created ON factory_products(created_at, id);
+
+CREATE TABLE factory_hypotheses (
+  id TEXT PRIMARY KEY NOT NULL CHECK(length(trim(id)) > 0),
+  created_at TEXT NOT NULL,
+  product_id TEXT NOT NULL REFERENCES factory_products(id),
+  statement TEXT NOT NULL,
+  success_criterion TEXT NOT NULL,
+  status TEXT NOT NULL CHECK(status IN ('proposed','testing','supported','refuted')),
+  UNIQUE(id, product_id)
+);
+
+CREATE INDEX idx_factory_hypotheses_product ON factory_hypotheses(product_id, created_at, id);
+
+CREATE TABLE factory_experiments (
+  id TEXT PRIMARY KEY NOT NULL CHECK(length(trim(id)) > 0),
+  created_at TEXT NOT NULL,
+  product_id TEXT NOT NULL REFERENCES factory_products(id),
+  hypothesis_id TEXT NOT NULL REFERENCES factory_hypotheses(id),
+  goal_id TEXT REFERENCES goals(id),
+  task_id TEXT REFERENCES task_graph(id),
+  status TEXT NOT NULL CHECK(status IN ('planned','running','completed','cancelled')),
+  method TEXT NOT NULL,
+  UNIQUE(id, product_id),
+  FOREIGN KEY(hypothesis_id, product_id) REFERENCES factory_hypotheses(id, product_id)
+);
+
+CREATE INDEX idx_factory_experiments_product ON factory_experiments(product_id, created_at, id);
+
+CREATE TABLE factory_metric_snapshots (
+  id TEXT PRIMARY KEY NOT NULL CHECK(length(trim(id)) > 0),
+  created_at TEXT NOT NULL,
+  product_id TEXT NOT NULL REFERENCES factory_products(id),
+  experiment_id TEXT REFERENCES factory_experiments(id),
+  metrics TEXT NOT NULL CHECK(json_valid(metrics) AND json_type(metrics) = 'object'),
+  captured_at TEXT NOT NULL,
+  FOREIGN KEY(experiment_id, product_id) REFERENCES factory_experiments(id, product_id)
+);
+
+CREATE INDEX idx_factory_metric_snapshots_product ON factory_metric_snapshots(product_id, created_at, id);
+
+CREATE TABLE factory_feedback (
+  id TEXT PRIMARY KEY NOT NULL CHECK(length(trim(id)) > 0),
+  created_at TEXT NOT NULL,
+  product_id TEXT NOT NULL REFERENCES factory_products(id),
+  source TEXT NOT NULL,
+  content TEXT NOT NULL
+);
+
+CREATE INDEX idx_factory_feedback_product ON factory_feedback(product_id, created_at, id);
+
+CREATE TABLE factory_features (
+  id TEXT PRIMARY KEY NOT NULL CHECK(length(trim(id)) > 0),
+  created_at TEXT NOT NULL,
+  product_id TEXT NOT NULL REFERENCES factory_products(id),
+  title TEXT NOT NULL,
+  description TEXT NOT NULL,
+  status TEXT NOT NULL CHECK(status IN ('proposed','planned','built','rejected')),
+  task_id TEXT REFERENCES task_graph(id)
+);
+
+CREATE INDEX idx_factory_features_product ON factory_features(product_id, created_at, id);
+
+CREATE TABLE factory_decisions (
+  id TEXT PRIMARY KEY NOT NULL CHECK(length(trim(id)) > 0),
+  created_at TEXT NOT NULL,
+  product_id TEXT NOT NULL REFERENCES factory_products(id),
+  rationale TEXT NOT NULL,
+  evidence_ids TEXT NOT NULL CHECK(json_valid(evidence_ids) AND json_type(evidence_ids) = 'array'),
+  outcome TEXT NOT NULL
+);
+
+CREATE INDEX idx_factory_decisions_product ON factory_decisions(product_id, created_at, id);
+
+CREATE TABLE factory_learnings (
+  id TEXT PRIMARY KEY NOT NULL CHECK(length(trim(id)) > 0),
+  created_at TEXT NOT NULL,
+  product_id TEXT NOT NULL REFERENCES factory_products(id),
+  experiment_id TEXT REFERENCES factory_experiments(id),
+  content TEXT NOT NULL,
+  confidence REAL NOT NULL CHECK(confidence BETWEEN 0 AND 1),
+  FOREIGN KEY(experiment_id, product_id) REFERENCES factory_experiments(id, product_id)
+);
+
+CREATE INDEX idx_factory_learnings_product ON factory_learnings(product_id, created_at, id);
+
+CREATE TABLE factory_resource_reservations (
+  id TEXT PRIMARY KEY NOT NULL CHECK(length(trim(id)) > 0),
+  created_at TEXT NOT NULL,
+  product_id TEXT NOT NULL REFERENCES factory_products(id),
+  task_id TEXT REFERENCES task_graph(id),
+  resource TEXT NOT NULL CHECK(resource IN ('compute','storage','inference')),
+  units REAL NOT NULL CHECK(units > 0),
+  operational_cost_cents INTEGER NOT NULL CHECK(typeof(operational_cost_cents) = 'integer' AND operational_cost_cents >= 0),
+  status TEXT NOT NULL CHECK(status IN ('requested','reserved','released')),
+  expires_at TEXT NOT NULL
+);
+
+CREATE INDEX idx_factory_resource_reservations_product ON factory_resource_reservations(product_id, created_at, id);
+
+CREATE TABLE factory_capacity_snapshots (
+  id TEXT PRIMARY KEY NOT NULL CHECK(length(trim(id)) > 0),
+  created_at TEXT NOT NULL,
+  available_compute_units REAL NOT NULL CHECK(available_compute_units >= 0),
+  available_storage_mb REAL NOT NULL CHECK(available_storage_mb >= 0),
+  available_operational_budget_cents INTEGER NOT NULL CHECK(typeof(available_operational_budget_cents) = 'integer' AND available_operational_budget_cents >= 0),
+  captured_at TEXT NOT NULL
+);
+
+CREATE INDEX idx_factory_capacity_snapshots_created ON factory_capacity_snapshots(created_at, id);
+
+CREATE TABLE factory_approvals (
+  id TEXT PRIMARY KEY NOT NULL CHECK(length(trim(id)) > 0),
+  created_at TEXT NOT NULL,
+  product_id TEXT NOT NULL REFERENCES factory_products(id),
+  action TEXT NOT NULL CHECK(action IN ('prototype','experiment','resource_reservation')),
+  status TEXT NOT NULL CHECK(status IN ('pending','approved','rejected')),
+  requested_by TEXT NOT NULL,
+  decided_by TEXT,
+  decided_at TEXT,
+  CHECK((status = 'pending' AND decided_by IS NULL AND decided_at IS NULL) OR (status IN ('approved','rejected') AND decided_by IS NOT NULL AND decided_at IS NOT NULL))
+);
+
+CREATE INDEX idx_factory_approvals_product ON factory_approvals(product_id, created_at, id);
+
+CREATE TABLE factory_events (
+  id TEXT PRIMARY KEY NOT NULL CHECK(length(trim(id)) > 0),
+  created_at TEXT NOT NULL,
+  product_id TEXT NOT NULL REFERENCES factory_products(id),
+  type TEXT NOT NULL CHECK(type IN ('product.created','product.stage_changed','approval.decided')),
+  actor TEXT NOT NULL CHECK(length(trim(actor)) > 0),
+  payload TEXT NOT NULL CHECK(json_valid(payload) AND json_type(payload) = 'object')
+);
+
+CREATE INDEX idx_factory_events_product ON factory_events(product_id, created_at, id);
+
+CREATE TRIGGER factory_product_owner_immutable BEFORE UPDATE OF creator_address ON factory_products
+WHEN NEW.creator_address != OLD.creator_address BEGIN SELECT RAISE(ABORT, 'Product creator is immutable'); END;
+CREATE TRIGGER factory_approval_creator BEFORE UPDATE ON factory_approvals
+WHEN NEW.status != 'pending' AND NEW.decided_by != (SELECT creator_address FROM factory_products WHERE id = NEW.product_id)
+BEGIN SELECT RAISE(ABORT, 'Only the product creator can decide approvals'); END;
+CREATE TRIGGER factory_approval_insert_creator BEFORE INSERT ON factory_approvals
+WHEN NEW.status != 'pending' AND NEW.decided_by != (SELECT creator_address FROM factory_products WHERE id = NEW.product_id)
+BEGIN SELECT RAISE(ABORT, 'Only the product creator can decide approvals'); END;
+CREATE TRIGGER factory_events_no_update BEFORE UPDATE ON factory_events
+BEGIN SELECT RAISE(ABORT, 'Factory events are append-only'); END;
+CREATE TRIGGER factory_events_no_delete BEFORE DELETE ON factory_events
+BEGIN SELECT RAISE(ABORT, 'Factory events are append-only'); END;
+CREATE TRIGGER factory_events_no_replace BEFORE INSERT ON factory_events
+WHEN EXISTS(SELECT 1 FROM factory_events WHERE id = NEW.id)
+BEGIN SELECT RAISE(ABORT, 'Factory events are append-only'); END;
+CREATE TRIGGER factory_product_no_replace BEFORE INSERT ON factory_products
+WHEN EXISTS(SELECT 1 FROM factory_products WHERE id = NEW.id)
+BEGIN SELECT RAISE(ABORT, 'Product replacement is forbidden'); END;
+CREATE TRIGGER factory_approval_terminal BEFORE UPDATE ON factory_approvals
+WHEN OLD.status != 'pending'
+BEGIN SELECT RAISE(ABORT, 'Approval already decided'); END;
+CREATE TRIGGER factory_approval_no_replace BEFORE INSERT ON factory_approvals
+WHEN EXISTS(SELECT 1 FROM factory_approvals WHERE id = NEW.id)
+BEGIN SELECT RAISE(ABORT, 'Approval replacement is forbidden'); END;
+`;
+
+// Additive Factory scheduling metadata; all work still lives in task_graph.
+export const MIGRATION_V13 = `
+ALTER TABLE factory_products ADD COLUMN portfolio_state TEXT NOT NULL DEFAULT 'research'
+  CHECK(portfolio_state IN ('research','building','launch_ready','validation','optimizing','scaling','pivoting','killed','archived'));
+UPDATE factory_products SET portfolio_state = CASE stage WHEN 'building' THEN 'building' WHEN 'validating' THEN 'validation' WHEN 'archived' THEN 'archived' ELSE 'research' END;
+ALTER TABLE factory_products ADD COLUMN factory_paused INTEGER NOT NULL DEFAULT 0 CHECK(factory_paused IN (0,1));
+ALTER TABLE factory_products ADD COLUMN factory_failure TEXT;
+ALTER TABLE factory_approvals ADD COLUMN factory_action_id TEXT;
+ALTER TABLE factory_resource_reservations ADD COLUMN resource_class TEXT NOT NULL DEFAULT 'compute'
+  CHECK(resource_class IN ('build','research','monitoring','inference','compute','experiment'));
+ALTER TABLE factory_resource_reservations ADD COLUMN managed INTEGER NOT NULL DEFAULT 0 CHECK(managed IN (0,1));
+ALTER TABLE factory_resource_reservations ADD COLUMN released_reason TEXT;
+ALTER TABLE factory_capacity_snapshots ADD COLUMN resource_capacity TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(resource_capacity));
+ALTER TABLE task_graph ADD COLUMN product_id TEXT REFERENCES factory_products(id);
+ALTER TABLE task_graph ADD COLUMN factory_action_id TEXT;
+ALTER TABLE task_graph ADD COLUMN resource_class TEXT CHECK(resource_class IN ('build','research','monitoring','inference','compute','experiment'));
+ALTER TABLE task_graph ADD COLUMN reservation_id TEXT REFERENCES factory_resource_reservations(id);
+ALTER TABLE task_graph ADD COLUMN deadline TEXT;
+ALTER TABLE task_graph ADD COLUMN urgency INTEGER NOT NULL DEFAULT 0 CHECK(urgency BETWEEN 0 AND 100);
+ALTER TABLE task_graph ADD COLUMN requires_approval INTEGER NOT NULL DEFAULT 0 CHECK(requires_approval IN (0,1));
+ALTER TABLE task_graph ADD COLUMN preemptible INTEGER NOT NULL DEFAULT 0 CHECK(preemptible IN (0,1));
+ALTER TABLE task_graph ADD COLUMN critical_incident INTEGER NOT NULL DEFAULT 0 CHECK(critical_incident IN (0,1));
+ALTER TABLE task_graph ADD COLUMN resource_units REAL NOT NULL DEFAULT 1 CHECK(resource_units > 0);
+ALTER TABLE task_graph ADD COLUMN factory_details TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(factory_details));
+CREATE UNIQUE INDEX idx_factory_action ON task_graph(product_id, factory_action_id) WHERE product_id IS NOT NULL;
+CREATE INDEX idx_factory_concurrency ON task_graph(product_id, resource_class, status);
+CREATE UNIQUE INDEX idx_factory_managed_reservation ON factory_resource_reservations(task_id) WHERE managed = 1;
+CREATE INDEX idx_factory_reservations_active ON factory_resource_reservations(status, resource_class, product_id);
+CREATE TRIGGER factory_assignment_guard BEFORE UPDATE OF status ON task_graph
+WHEN NEW.product_id IS NOT NULL AND NEW.status IN ('assigned','running') AND NOT EXISTS (
+  SELECT 1 FROM factory_resource_reservations r WHERE r.id = NEW.reservation_id AND r.task_id = NEW.id
+    AND r.product_id = NEW.product_id AND r.resource_class = NEW.resource_class AND r.managed = 1 AND r.status = 'reserved'
+)
+BEGIN SELECT RAISE(ABORT, 'Factory assignment requires a matching reservation'); END;
+-- Other Task Graph helpers (including retry) cannot leave a Factory reservation active.
+CREATE TRIGGER factory_release_task_reservation AFTER UPDATE OF status ON task_graph
+WHEN NEW.product_id IS NOT NULL AND NEW.status NOT IN ('assigned','running')
+BEGIN
+  UPDATE factory_resource_reservations SET status = 'released', released_reason = NEW.status
+    WHERE task_id = NEW.id AND status = 'reserved' AND managed = 1;
+END;
+`;
+
+// Discovery metadata extends the same V12 tables. Decisions may precede products.
+export const MIGRATION_V14 = `
+ALTER TABLE factory_opportunities ADD COLUMN discovery_metadata TEXT CHECK(discovery_metadata IS NULL OR json_valid(discovery_metadata));
+ALTER TABLE factory_evidence ADD COLUMN discovery_metadata TEXT CHECK(discovery_metadata IS NULL OR json_valid(discovery_metadata));
+ALTER TABLE factory_evidence ADD COLUMN signal_fingerprint TEXT;
+CREATE UNIQUE INDEX idx_factory_evidence_signal ON factory_evidence(opportunity_id, signal_fingerprint) WHERE signal_fingerprint IS NOT NULL;
+CREATE INDEX idx_factory_evidence_opportunity ON factory_evidence(opportunity_id, id);
+CREATE TABLE factory_decisions_v14 (
+  id TEXT PRIMARY KEY NOT NULL CHECK(length(trim(id)) > 0),
+  created_at TEXT NOT NULL,
+  product_id TEXT REFERENCES factory_products(id),
+  opportunity_id TEXT REFERENCES factory_opportunities(id),
+  rationale TEXT NOT NULL,
+  evidence_ids TEXT NOT NULL CHECK(json_valid(evidence_ids) AND json_type(evidence_ids) = 'array'),
+  outcome TEXT NOT NULL,
+  CHECK(product_id IS NOT NULL OR opportunity_id IS NOT NULL)
+);
+INSERT INTO factory_decisions_v14(id,created_at,product_id,rationale,evidence_ids,outcome)
+SELECT id,created_at,product_id,rationale,evidence_ids,outcome FROM factory_decisions;
+DROP TABLE factory_decisions;
+ALTER TABLE factory_decisions_v14 RENAME TO factory_decisions;
+CREATE INDEX idx_factory_decisions_product ON factory_decisions(product_id,created_at,id);
+CREATE INDEX idx_factory_decisions_opportunity ON factory_decisions(opportunity_id,created_at,id);
+`;
+
+// Company governance extends Evidence/Decision and shares the existing WAL connection.
+export const MIGRATION_V15 = `
+ALTER TABLE factory_evidence ADD COLUMN company_metadata TEXT CHECK(company_metadata IS NULL OR json_valid(company_metadata));
+-- SQLite cannot widen the V14 CHECK constraint in place. Preserve all rows/indexes.
+CREATE TABLE factory_decisions_v15 (
+ id TEXT PRIMARY KEY NOT NULL CHECK(length(trim(id))>0),created_at TEXT NOT NULL,
+ product_id TEXT REFERENCES factory_products(id),opportunity_id TEXT REFERENCES factory_opportunities(id),
+ rationale TEXT NOT NULL,evidence_ids TEXT NOT NULL CHECK(json_valid(evidence_ids) AND json_type(evidence_ids)='array'),outcome TEXT NOT NULL,
+ company_address TEXT,company_metadata TEXT CHECK(company_metadata IS NULL OR json_valid(company_metadata)),
+ CHECK(product_id IS NOT NULL OR opportunity_id IS NOT NULL OR company_address IS NOT NULL),
+ CHECK(company_address IS NULL OR (company_metadata IS NOT NULL AND json_extract(company_metadata,'$.owner')=company_address))
+);
+INSERT INTO factory_decisions_v15(id,created_at,product_id,opportunity_id,rationale,evidence_ids,outcome) SELECT id,created_at,product_id,opportunity_id,rationale,evidence_ids,outcome FROM factory_decisions;
+DROP TABLE factory_decisions;
+ALTER TABLE factory_decisions_v15 RENAME TO factory_decisions;
+CREATE INDEX idx_factory_decisions_product ON factory_decisions(product_id,created_at,id);
+CREATE INDEX idx_factory_decisions_opportunity ON factory_decisions(opportunity_id,created_at,id);
+CREATE INDEX idx_factory_decisions_company ON factory_decisions(company_address,created_at,id);
+CREATE TABLE company_records (
+  creator_address TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  record_key TEXT NOT NULL,
+  revision INTEGER NOT NULL CHECK(revision >= 1),
+  id TEXT NOT NULL UNIQUE,
+  created_at TEXT NOT NULL,
+  content TEXT NOT NULL CHECK(json_valid(content)),
+  content_hash TEXT NOT NULL,
+  PRIMARY KEY(creator_address,kind,record_key,revision)
+);
+CREATE INDEX idx_company_records_scope ON company_records(creator_address,kind,record_key,revision);
+CREATE TRIGGER company_records_no_update BEFORE UPDATE ON company_records BEGIN SELECT RAISE(ABORT,'Company history is immutable'); END;
+CREATE TRIGGER company_records_no_delete BEFORE DELETE ON company_records BEGIN SELECT RAISE(ABORT,'Company history is immutable'); END;
+CREATE TRIGGER company_records_no_replace BEFORE INSERT ON company_records WHEN EXISTS(SELECT 1 FROM company_records WHERE id=NEW.id OR (creator_address=NEW.creator_address AND kind=NEW.kind AND record_key=NEW.record_key AND revision=NEW.revision)) BEGIN SELECT RAISE(ABORT,'Company history is immutable'); END;
+CREATE TRIGGER company_evidence_immutable BEFORE UPDATE ON factory_evidence WHEN OLD.company_metadata IS NOT NULL BEGIN SELECT RAISE(ABORT,'Evidence classification is immutable'); END;
+CREATE TRIGGER company_evidence_no_delete BEFORE DELETE ON factory_evidence WHEN OLD.company_metadata IS NOT NULL BEGIN SELECT RAISE(ABORT,'Evidence history is immutable'); END;
+CREATE TRIGGER company_evidence_no_replace BEFORE INSERT ON factory_evidence WHEN EXISTS(SELECT 1 FROM factory_evidence WHERE id=NEW.id AND company_metadata IS NOT NULL) BEGIN SELECT RAISE(ABORT,'Evidence history is immutable'); END;
+CREATE TRIGGER company_decision_immutable BEFORE UPDATE ON factory_decisions WHEN OLD.company_metadata IS NOT NULL BEGIN SELECT RAISE(ABORT,'Company decision is immutable'); END;
+CREATE TRIGGER company_decision_no_delete BEFORE DELETE ON factory_decisions WHEN OLD.company_metadata IS NOT NULL BEGIN SELECT RAISE(ABORT,'Company decision is immutable'); END;
+CREATE TRIGGER company_decision_no_replace BEFORE INSERT ON factory_decisions WHEN EXISTS(SELECT 1 FROM factory_decisions WHERE id=NEW.id AND company_metadata IS NOT NULL) BEGIN SELECT RAISE(ABORT,'Company decision is immutable'); END;
+`;
+
+/** Indexed, minimized analytics observations on the existing SQLite database. */
+export const MIGRATION_V16 = `
+CREATE TABLE analytics_event_receipts (
+ creator_address TEXT NOT NULL,provider_id TEXT NOT NULL,event_id TEXT NOT NULL,
+ id TEXT NOT NULL,product_id TEXT NOT NULL REFERENCES factory_products(id),occurred_at TEXT NOT NULL,nature TEXT NOT NULL,
+ payload_hash TEXT NOT NULL,identity TEXT NOT NULL CHECK(json_valid(identity)),
+ PRIMARY KEY(creator_address,provider_id,event_id)
+);
+CREATE INDEX idx_analytics_receipts_period ON analytics_event_receipts(creator_address,product_id,occurred_at);
+CREATE INDEX idx_analytics_receipt_fact ON analytics_event_receipts(creator_address,provider_id,json_extract(identity,'$.economicMetric'),json_extract(identity,'$.receiptHash'));
+CREATE TRIGGER analytics_receipts_no_update BEFORE UPDATE ON analytics_event_receipts BEGIN SELECT RAISE(ABORT,'Analytics dedup receipts immutable'); END;
+CREATE TRIGGER analytics_receipts_no_delete BEFORE DELETE ON analytics_event_receipts BEGIN SELECT RAISE(ABORT,'Analytics dedup receipts retained'); END;
+CREATE TRIGGER analytics_receipts_no_replace BEFORE INSERT ON analytics_event_receipts WHEN EXISTS(SELECT 1 FROM analytics_event_receipts WHERE creator_address=NEW.creator_address AND provider_id=NEW.provider_id AND event_id=NEW.event_id) BEGIN SELECT RAISE(ABORT,'Analytics dedup receipts immutable'); END;
+CREATE TABLE analytics_observations (
+ creator_address TEXT NOT NULL, provider_id TEXT NOT NULL, event_id TEXT NOT NULL,
+ id TEXT NOT NULL UNIQUE, product_id TEXT NOT NULL REFERENCES factory_products(id),
+ occurred_at TEXT NOT NULL, received_at TEXT NOT NULL, category TEXT NOT NULL,
+ nature TEXT NOT NULL, payload_hash TEXT NOT NULL,
+ content TEXT NOT NULL CHECK(json_valid(content)), content_hash TEXT NOT NULL,
+ PRIMARY KEY(creator_address,provider_id,event_id)
+);
+CREATE INDEX idx_analytics_product_period ON analytics_observations(creator_address,product_id,occurred_at,id);
+CREATE TRIGGER analytics_observations_no_update BEFORE UPDATE ON analytics_observations BEGIN SELECT RAISE(ABORT,'Analytics corrections require new events'); END;
+CREATE TRIGGER analytics_observations_no_replace BEFORE INSERT ON analytics_observations WHEN EXISTS(SELECT 1 FROM analytics_observations WHERE id=NEW.id OR (creator_address=NEW.creator_address AND provider_id=NEW.provider_id AND event_id=NEW.event_id)) BEGIN SELECT RAISE(ABORT,'Analytics event identity is immutable'); END;
 `;

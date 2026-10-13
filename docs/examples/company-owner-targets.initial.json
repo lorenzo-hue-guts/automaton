@@ -1,0 +1,109 @@
+{
+  "enabled": false,
+  "currency": "EUR",
+  "timezone": "Europe/Paris",
+  "materialMissRatio": 0.8,
+  "strategicMissCount": 3,
+  "minGreenlightLevel": 2,
+  "maxCapitalCents": 0,
+  "maxBuilderHours": 0,
+  "maxComputeUnits": 0,
+  "forecastHorizons": [
+    4,
+    8,
+    12
+  ],
+  "reviews": {
+    "weekly": true,
+    "monthly": true,
+    "dailyAnomaliesOnly": true
+  },
+  "maxRisk": "material",
+  "allowStretch": false,
+  "initialOwnerTargets": [
+    {
+      "periodStart": "2026-10-12T00:00:00+02:00",
+      "periodEnd": "2026-10-19T00:00:00+02:00",
+      "timezone": "Europe/Paris",
+      "currency": "EUR",
+      "metric": "grossRevenue",
+      "metricDefinition": {
+        "key": "owner-gross-revenue",
+        "revision": 1
+      },
+      "amountCents": 30000,
+      "creatorAuthorized": true,
+      "changeReason": "Initial six-week targets explicitly imposed by creator"
+    },
+    {
+      "periodStart": "2026-10-19T00:00:00+02:00",
+      "periodEnd": "2026-10-26T00:00:00+01:00",
+      "timezone": "Europe/Paris",
+      "currency": "EUR",
+      "metric": "grossRevenue",
+      "metricDefinition": {
+        "key": "owner-gross-revenue",
+        "revision": 1
+      },
+      "amountCents": 70000,
+      "creatorAuthorized": true,
+      "changeReason": "Initial six-week targets explicitly imposed by creator"
+    },
+    {
+      "periodStart": "2026-10-26T00:00:00+01:00",
+      "periodEnd": "2026-11-02T00:00:00+01:00",
+      "timezone": "Europe/Paris",
+      "currency": "EUR",
+      "metric": "grossRevenue",
+      "metricDefinition": {
+        "key": "owner-gross-revenue",
+        "revision": 1
+      },
+      "amountCents": 110000,
+      "creatorAuthorized": true,
+      "changeReason": "Initial six-week targets explicitly imposed by creator"
+    },
+    {
+      "periodStart": "2026-11-02T00:00:00+01:00",
+      "periodEnd": "2026-11-09T00:00:00+01:00",
+      "timezone": "Europe/Paris",
+      "currency": "EUR",
+      "metric": "grossRevenue",
+      "metricDefinition": {
+        "key": "owner-gross-revenue",
+        "revision": 1
+      },
+      "amountCents": 150000,
+      "creatorAuthorized": true,
+      "changeReason": "Initial six-week targets explicitly imposed by creator"
+    },
+    {
+      "periodStart": "2026-11-09T00:00:00+01:00",
+      "periodEnd": "2026-11-16T00:00:00+01:00",
+      "timezone": "Europe/Paris",
+      "currency": "EUR",
+      "metric": "grossRevenue",
+      "metricDefinition": {
+        "key": "owner-gross-revenue",
+        "revision": 1
+      },
+      "amountCents": 200000,
+      "creatorAuthorized": true,
+      "changeReason": "Initial six-week targets explicitly imposed by creator"
+    },
+    {
+      "periodStart": "2026-11-16T00:00:00+01:00",
+      "periodEnd": "2026-11-23T00:00:00+01:00",
+      "timezone": "Europe/Paris",
+      "currency": "EUR",
+      "metric": "grossRevenue",
+      "metricDefinition": {
+        "key": "owner-gross-revenue",
+        "revision": 1
+      },
+      "amountCents": 250000,
+      "creatorAuthorized": true,
+      "changeReason": "Initial six-week targets explicitly imposed by creator"
+    }
+  ]
+}

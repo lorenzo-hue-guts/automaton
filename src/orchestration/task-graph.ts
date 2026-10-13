@@ -1,3 +1,4 @@
+import type { FactoryTaskMetadata } from "../product-factory/scheduling-types.js";
 import type { Database } from "better-sqlite3";
 import { ulid } from "ulid";
 import {
@@ -24,6 +25,8 @@ export type TaskStatus =
 export type GoalStatus = "active" | "completed" | "failed" | "paused";
 
 export interface TaskResult {
+  factoryExperimentReceipt?: {selectionKey:string;outcomeHash:string;computeUnits:number};
+  factoryReceipt?: { buildId: string; step: string; hash: string };
   success: boolean;
   output: string;
   artifacts: string[];
@@ -32,6 +35,7 @@ export interface TaskResult {
 }
 
 export interface TaskNode {
+  factory?: FactoryTaskMetadata;
   id: string;
   parentId: string | null;
   goalId: string;
@@ -182,6 +186,7 @@ export function decomposeGoal(
       ).filter((dep) => dep !== planned.localId);
 
       const taskId = insertTask(db, {
+        factory: planned.task.factory,
         parentId: parentRef,
         goalId,
         title: planned.task.title,
@@ -236,7 +241,7 @@ export function getReadyTasks(db: Database): TaskNode[] {
   return getReadyTaskRows(db).map(taskRowToTaskNode);
 }
 
-export function assignTask(db: Database, taskId: string, agentAddress: string): void {
+export function assignTask(db: Database, taskId: string, agentAddress: string, reservationId?: string): void {
   const normalizedAddress = agentAddress.trim();
   if (!normalizedAddress) {
     throw new Error("agentAddress cannot be empty");
@@ -252,6 +257,11 @@ export function assignTask(db: Database, taskId: string, agentAddress: string): 
       throw new Error(`Task ${taskId} is not assignable from status '${task.status}'`);
     }
 
+    if (task.factory) {
+      const reservation = reservationId && db.prepare("SELECT id FROM factory_resource_reservations WHERE id = ? AND task_id = ? AND managed = 1 AND status = 'reserved'").get(reservationId, taskId);
+      if (!reservation) throw new Error("Factory tasks require a ResourceManager reservation");
+      if (!normalizedAddress.startsWith("local://factory/")) throw new Error("Factory assignments are local only");
+    }
     updateTaskStatus(db, taskId, "assigned");
     db.prepare("UPDATE task_graph SET assigned_to = ? WHERE id = ?").run(normalizedAddress, taskId);
   });
@@ -366,6 +376,7 @@ export function pruneCompletedGoals(db: Database, olderThan: string): void {
          WHERE status = 'completed'
            AND completed_at IS NOT NULL
            AND completed_at < ?
+           AND NOT EXISTS (SELECT 1 FROM task_graph t WHERE t.goal_id = goals.id AND t.product_id IS NOT NULL)
        )`,
     ).run(olderThan);
 
@@ -373,7 +384,8 @@ export function pruneCompletedGoals(db: Database, olderThan: string): void {
       `DELETE FROM goals
        WHERE status = 'completed'
          AND completed_at IS NOT NULL
-         AND completed_at < ?`,
+         AND completed_at < ?
+         AND NOT EXISTS (SELECT 1 FROM task_graph t WHERE t.goal_id = goals.id AND t.product_id IS NOT NULL)`,
     ).run(olderThan);
   });
 }
@@ -462,8 +474,9 @@ export function detectCycles(tasks: CycleTask[]): boolean {
   return false;
 }
 
-function taskRowToTaskNode(row: TaskGraphRow): TaskNode {
+export function taskRowToTaskNode(row: TaskGraphRow): TaskNode {
   return {
+    ...(row.factory ? { factory: row.factory } : {}),
     id: row.id,
     parentId: row.parentId,
     goalId: row.goalId,
@@ -514,6 +527,7 @@ export function normalizeTaskResult(value: unknown): TaskResult | null {
   }
 
   return {
+    ...(candidate.factoryReceipt && typeof candidate.factoryReceipt.buildId === "string" && typeof candidate.factoryReceipt.step === "string" && typeof candidate.factoryReceipt.hash === "string" ? { factoryReceipt: candidate.factoryReceipt } : {}),
     success: candidate.success,
     output: candidate.output,
     artifacts: Array.isArray(candidate.artifacts)
@@ -697,4 +711,17 @@ function resolveReference(reference: string | null | undefined, map: Map<string,
   }
 
   return map.get(reference) ?? reference;
+}
+
+/** Cancellation shares the same terminal-state and reservation cleanup path. */
+export function cancelTask(db: Database, taskId: string): void {
+  withTransaction(db, () => {
+    const task = getTaskById(db, taskId);
+    if (!task) throw new Error(`Task not found: ${taskId}`);
+    if (TERMINAL_TASK_STATUSES.has(task.status)) return;
+    updateTaskStatus(db, taskId, "cancelled");
+    db.prepare("UPDATE task_graph SET assigned_to = NULL WHERE id = ?").run(taskId);
+    blockDependentsForFailedTask(db, taskId);
+    refreshGoalStatus(db, task.goalId);
+  });
 }

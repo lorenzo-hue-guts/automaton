@@ -1,0 +1,63 @@
+{
+  "simulation": true,
+  "realEconomicSuccessDemonstrated": false,
+  "opportunities": [
+    {
+      "o": "01M4CAAE4ANJKDDYA81BGAQ24V",
+      "p": "01M4CAAE4R0K4C684AB49BT12S",
+      "ids": [
+        "01M4CAAE4P98B1ZW1HYBS6AYTT",
+        "01M4CAAE4QNKWJ6KDPG7B06KA4",
+        "01M4CAAE4RBPZ3YKRQ6K7TPECW"
+      ],
+      "decisionId": "01M4CAAE54YNY0987K35MCNSRD",
+      "outcome": "GREENLIGHT"
+    },
+    {
+      "o": "01M4CAAE540ZFEH5A7NBZC1JVG",
+      "p": "01M4CAAE5DPT7CPVJRYDTYEHYF",
+      "ids": [
+        "01M4CAAE5BMS5ENH29J4QDEHCR",
+        "01M4CAAE5C52C2SHG7R3019YC8",
+        "01M4CAAE5DMRB516VC0XYXNZFG"
+      ],
+      "decisionId": "01M4CAAE5W5ERNY0BBJDZCSS42",
+      "outcome": "HOLD"
+    },
+    {
+      "o": "01M4CAAE5XP3GX6K9G1TP4PBKK",
+      "p": "01M4CAAE65SXD0QQPZ1H3STJYV",
+      "ids": [
+        "01M4CAAE63G1DP8E69M6C4Z68X",
+        "01M4CAAE63AGF93NY1V6N4EC4T",
+        "01M4CAAE64SFGGPCQA5Q4RJBP3"
+      ],
+      "decisionId": "01M4CAAE6GRYMR1A18JEHJVHXN",
+      "outcome": "REJECT"
+    },
+    {
+      "o": "01M4CAAE6HV0S087XM7EJAMQQS",
+      "p": "01M4CAAE6T3K1X0XGHSHW2SX31",
+      "ids": [
+        "01M4CAAE6RTQ3TPHQZKV2N5EWS",
+        "01M4CAAE6SXHFKS2ACVK0KGBQ3",
+        "01M4CAAE6SP77SRXM9C7AQ6AAA"
+      ],
+      "decisionId": "01M4CAAE72EH1XJCXEJSNK42T6",
+      "outcome": "REJECT"
+    }
+  ],
+  "chosenCapitalProposal": "existing-fix",
+  "targetOutcome": "MISSED",
+  "revenueGap": {
+    "assumptionIds": [],
+    "confidence": 0.8,
+    "evidenceIds": [],
+    "high": 20000,
+    "low": 15000,
+    "unit": "EUR:cents"
+  },
+  "recovery": "RECOVERY",
+  "forecastError": -4500,
+  "scorecardKey": "company-scorecard"
+}

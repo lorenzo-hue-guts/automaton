@@ -1,0 +1,46 @@
+{
+  "simulation": true,
+  "realEconomicSuccessDemonstrated": false,
+  "model": "Deterministic read-only SDK/verification contract doubles",
+  "products": [
+    {
+      "productId": "01M4DEST400A2C7AFPGWQWPHF8",
+      "gross": 1000,
+      "profit": 350,
+      "retention": 0.2,
+      "cac": null,
+      "reportHash": "101bfb8ea97003ccbbcf48b6ee4eebb0d7da68338bb8dc7b5c0c909be0bde54e"
+    },
+    {
+      "productId": "01M4DEST43TQEC8GQ1TSWT6BQP",
+      "gross": 800,
+      "profit": 700,
+      "retention": 0.8,
+      "cac": null,
+      "reportHash": "66e0bcf1ec5ae1afabb9288a78d067df0c1a8e7a4e2adc2acc99ef3aa7113607"
+    },
+    {
+      "productId": "01M4DEST45BWPE4SC3X734ZFCA",
+      "gross": 5000,
+      "profit": -1000,
+      "retention": 0.5,
+      "cac": null,
+      "reportHash": "33f4228276f8a44ff97c7eb7b61c383d729e6aa13b3109142edade43a5394405"
+    }
+  ],
+  "targetOutcome": "MISSED",
+  "revenueGap": {
+    "assumptionIds": [],
+    "confidence": 0.6080000000000001,
+    "evidenceIds": [],
+    "high": 18800,
+    "low": 11840,
+    "unit": "EUR:cents"
+  },
+  "chosenCapitalProposal": "proposal-1",
+  "stale": true,
+  "reportHash": "a2be7c251b4e833b7f0b9ede8b6283817fc111eab2d675cb4eed5c32bfddae3d",
+  "reviewHash": "e6ce56cc37deca4b87ef35ba9c4950db33717dd661486682c7b6b12651a8847e",
+  "dossierHash": "dc742b02f7c5d5141734048e5cd94d74f626f91137f87843e0cc29ac3dc4025e",
+  "capitalConfidence": 0.95
+}
